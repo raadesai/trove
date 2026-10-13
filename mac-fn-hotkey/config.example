@@ -1,0 +1,11 @@
+# Trove — Fn-hotkey config (macOS).
+#
+# Copy this file to ~/.config/trove/config (outside the repo — never committed):
+#   mkdir -p ~/.config/trove && cp mac-fn-hotkey/config.example ~/.config/trove/config
+# then fill in your own values. save.sh sources it; hammerspoon-init.lua reads it.
+#
+TROVE_ENDPOINT=https://YOUR_PROJECT_REF.supabase.co/functions/v1/save
+TROVE_SAVE_TOKEN=YOUR_SAVE_TOKEN
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON=YOUR_SUPABASE_ANON_KEY
+NAME=My Trove

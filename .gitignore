@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Env / secrets — never commit real tokens or keys
+.env
+.env.*
+*.local
+extension/secrets.js
+
+# Supabase local
+.branches
+.temp
+
+# Editor / OS
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+.vercel

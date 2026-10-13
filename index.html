@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trove — a visual map of your links</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --paper:      #e9e3d5;
+    --paper-2:    #efe9dc;
+    --card:       #fcfaf4;
+    --card-line:  #e3ddcd;
+    --ink:        #2f2c24;
+    --ink-soft:   #6a6455;
+    --muted:      #a49d89;
+    --web:        #c3b99e;
+    --web-strong: #a99d7c;
+    --accent:     #b07d3c;
+    --accent-ink: #7c5622;
+    --shadow:     18px 30px 60px -30px rgba(70,58,32,.45);
+    --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --sans:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --thumb-fx: saturate(.88) contrast(1.02) brightness(1.01) sepia(.05);
+  }
+
+  html, body {
+    height: 100%; overflow: hidden; color: var(--ink);
+    font-family: var(--sans); -webkit-font-smoothing: antialiased; background: var(--paper);
+  }
+
+  /* ── viewport / canvas ── */
+  #viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; background-color: var(--paper); }
+  #viewport.grabbing { cursor: grabbing; }
+  #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+
+  /* spiderweb layer (behind bubbles + cards) */
+  #web { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; z-index: 0; }
+  #web path { fill: none; stroke-linecap: round; }
+  #web path.trunk  { stroke: var(--web-strong); stroke-width: 1.5; }
+  #web path.tether { stroke: var(--web); stroke-width: 1.3; }
+
+  /* ── bubbles: hub + one per bucket. Opaque, so cords emerge from the edge ── */
+  .bubble {
+    position: absolute; transform: translate(-50%, -50%); z-index: 3; cursor: grab;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: 999px;
+    padding: 8px 16px; box-shadow: 0 3px 14px -6px rgba(70,58,32,.4);
+    display: flex; align-items: baseline; gap: 9px; white-space: nowrap;
+    font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 15px; color: var(--ink-soft);
+    transition: border-color .14s, color .14s, box-shadow .14s, transform .14s;
+  }
+  .bubble:hover { border-color: var(--web-strong); color: var(--ink); }
+  .bubble.dragging { cursor: grabbing; z-index: 6; border-color: var(--accent); box-shadow: 0 6px 22px -6px rgba(176,125,60,.6); transition: none; }
+  .bubble.lit { color: var(--accent-ink); border-color: rgba(176,125,60,.55); box-shadow: 0 4px 18px -6px rgba(176,125,60,.5); }
+  .bubble .tcount {
+    font-family: var(--sans); font-style: normal; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .03em; color: var(--muted);
+  }
+  #canvas.far .bubble { font-size: 22px; padding: 12px 22px; }
+
+  .hub {
+    position: absolute; transform: translate(-50%, -50%); z-index: 4; pointer-events: none;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: 999px;
+    padding: 13px 26px; box-shadow: 0 6px 22px -8px rgba(70,58,32,.5); text-align: center;
+    display: flex; align-items: center; gap: 12px; white-space: nowrap;
+  }
+  .hub .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
+    box-shadow: 0 0 0 5px rgba(176,125,60,.14);
+  }
+  .hub .txt { text-align: left; }
+  .hub .name { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 23px; color: var(--ink); line-height: 1.05; }
+  .hub .tag { margin-top: 3px; font-size: 8.5px; font-weight: 600; letter-spacing: .26em; text-transform: uppercase; color: var(--muted); }
+  #canvas.far .hub .name { font-size: 30px; }
+
+  /* ── card / preview block ── */
+  .card {
+    position: absolute; width: 190px; background: var(--card);
+    border: 1px solid var(--card-line); border-radius: 10px; overflow: visible;
+    box-shadow: 0 1px 2px rgba(60,50,25,.06); z-index: 1;
+    transition: box-shadow .16s, transform .12s, border-color .16s, opacity .3s;
+  }
+  .card:hover { border-color: var(--web-strong); box-shadow: var(--shadow); transform: translateY(-2px); z-index: 6; }
+  .card.dragging { cursor: grabbing; z-index: 20; box-shadow: var(--shadow); border-color: var(--accent); transform: scale(1.03); transition: none; }
+  .card.dimmed { opacity: .16; }
+  .card.leaving { transform: scale(.7); opacity: 0; pointer-events: none; }
+  .card .inner { border-radius: 10px; overflow: hidden; }
+
+  .thumb { width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #ddd6c4; display: block; }
+  .thumb img, .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; filter: var(--thumb-fx); }
+  .thumb.poster { aspect-ratio: 3 / 4; }
+
+  /* text preview for links with no image — looks intentional, not broken */
+  .thumb.text { aspect-ratio: 16 / 9; display: grid; place-items: center; position: relative; }
+  .thumb.text::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 30% 25%, rgba(255,255,255,.5), transparent 60%); }
+  .thumb.text .tsrc { position: relative; font-family: var(--serif); font-style: italic; font-weight: 600; font-size: 26px; letter-spacing: .02em; }
+  .thumb.text.s-x   { background: linear-gradient(140deg,#dfe4ee,#c9d1e0); } .thumb.text.s-x .tsrc { color:#3a4a63; }
+  .thumb.text.s-yt  { background: linear-gradient(140deg,#f3ddd8,#e7c6bf); } .thumb.text.s-yt .tsrc { color:#b23c2c; }
+  .thumb.text.s-sub { background: linear-gradient(140deg,#f1e7d4,#e6d6b6); } .thumb.text.s-sub .tsrc { color:var(--accent-ink); }
+  .thumb.text.s-nf  { background: linear-gradient(140deg,#efd6d3,#dcb3ad); } .thumb.text.s-nf .tsrc { color:#8a2a22; }
+  .thumb.text.s-web { background: linear-gradient(140deg,#e9e2d1,#d8cfb6); } .thumb.text.s-web .tsrc { color:var(--ink-soft); font-size:19px; }
+
+  /* X quote card — the tweet text as an intentional quote (X gives no image) */
+  .xquote {
+    min-height: 174px; padding: 15px 14px 13px; display: flex; flex-direction: column;
+    background: linear-gradient(155deg, #eef1f7, #dde3ee);
+  }
+  .xquote .qmark { font-family: var(--serif); font-size: 34px; line-height: .5; color: #a6b2c8; margin-bottom: 6px; }
+  .xquote .qtext {
+    font-family: var(--serif); font-style: italic; font-size: 13px; line-height: 1.5; color: #313c4f; flex: 1;
+    display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .xquote .qmeta { display: flex; align-items: center; gap: 7px; margin-top: 11px; }
+  .xquote .qhandle { font-size: 10.5px; color: #5c6b85; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #canvas.far .xquote > * { opacity: 0; transition: opacity .2s; }
+
+  .body { padding: 9px 11px 11px; transition: opacity .2s; }
+  .title {
+    font-size: 12px; line-height: 1.42; color: var(--ink); margin-bottom: 8px; font-weight: 500;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .foot { display: flex; align-items: center; gap: 6px; }
+  .badge { font-size: 8px; font-weight: 700; letter-spacing: .05em; padding: 2px 5px; border-radius: 4px; flex-shrink: 0; text-transform: uppercase; }
+  .b-yt  { background:#f7e3df; color:#b23c2c; } .b-x { background:#e4e6ee; color:#3a4a63; }
+  .b-imdb{ background:#f2e6c8; color:#8a6d17; } .b-sub { background:#f0e7d6; color:var(--accent-ink); }
+  .b-nf  { background:#f3dbd7; color:#8a2a22; } .b-web { background:#ece6d7; color:var(--ink-soft); }
+  .domain { font-size: 9.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #canvas.far .body { opacity: 0; }
+
+  .startag { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 12px; color: var(--accent); filter: drop-shadow(0 1px 2px rgba(0,0,0,.25)); }
+
+  /* connector knob — the simple attach / detach control */
+  .knob {
+    position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+    width: 15px; height: 15px; border-radius: 50%; z-index: 5; cursor: pointer;
+    background: var(--accent); border: 2px solid var(--paper); box-shadow: 0 1px 4px rgba(70,58,32,.4);
+    transition: transform .12s, background .12s, border-color .12s;
+  }
+  .knob::after { content: ''; position: absolute; inset: -7px; border-radius: 50%; } /* bigger hit area */
+  .knob:hover { transform: translateX(-50%) scale(1.35); }
+  .knob.off { background: var(--paper-2); border-color: var(--web-strong); cursor: grab; }
+  .knob.off:hover { background: var(--web); }
+  #canvas.far .knob { display: none; }
+
+  /* dragging a line out of a detached knob to re-plug it into a bucket */
+  #web path.plugline { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 2 7; opacity: .95; }
+  .card.plugging { pointer-events: none; z-index: 20; }
+  .card.plugging .knob { transform: translateX(-50%) scale(1.35); background: var(--accent); border-color: var(--paper); cursor: grabbing; }
+  .bubble.plug-target { color: var(--accent-ink); border-color: var(--accent); box-shadow: 0 5px 22px -5px rgba(176,125,60,.7); }
+
+  /* hover actions */
+  .acts { position: absolute; top: 7px; right: 7px; display: flex; gap: 5px; opacity: 0; transition: opacity .15s; z-index: 6; }
+  .card:hover .acts { opacity: 1; }
+  #canvas.far .acts { display: none; }
+  .acts button {
+    width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255,255,255,.6); cursor: pointer;
+    background: rgba(252,250,244,.92); backdrop-filter: blur(6px); color: var(--ink-soft);
+    font-size: 13px; line-height: 1; display: grid; place-items: center; transition: .12s; box-shadow: 0 2px 6px rgba(60,50,25,.14);
+  }
+  .acts .promote:hover { background: var(--accent); color: #fff; }
+  .acts .consume:hover { background: var(--ink); color: var(--paper); }
+  .acts .demote:hover  { background: var(--ink-soft); color: var(--paper); }
+
+  /* ── top chrome ── */
+  .wordmark { position: fixed; top: 20px; left: 26px; z-index: 30; font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 26px; color: var(--ink); }
+
+  /* liquid-glass toggle — translucent, blurred, specular top edge */
+  .toggle {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 3px;
+    background: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.03));
+    backdrop-filter: blur(22px) saturate(1.7); -webkit-backdrop-filter: blur(22px) saturate(1.7);
+    border: 1px solid rgba(255,255,255,.34);
+    border-radius: 15px; padding: 4px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.42), inset 0 -1px 0 rgba(255,255,255,.08),
+                0 8px 26px -12px rgba(70,58,32,.3);
+  }
+  .toggle button {
+    font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--ink-soft); background: none; border: 0;
+    padding: 8px 18px; border-radius: 11px; cursor: pointer; transition: .15s; display: flex; align-items: center; gap: 8px;
+  }
+  .toggle button.active {
+    background: linear-gradient(135deg, rgba(47,44,36,.44), rgba(47,44,36,.30)); color: #fdfbf5;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.08),
+                0 2px 10px rgba(60,50,25,.22);
+    text-shadow: 0 1px 2px rgba(40,32,16,.25);
+  }
+  .toggle .pill { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 20px; min-width: 18px; text-align: center; background: rgba(0,0,0,.10); }
+  .toggle .pill:empty { display: none; }
+  .toggle button.active .pill { background: rgba(255,255,255,.22); }
+
+  /* top-right tool stack: search on top, cleanup drawn out beneath on hover */
+  #tools { position: fixed; top: 20px; right: 26px; z-index: 30; display: flex; flex-direction: column; align-items: flex-end; }
+
+  /* search — collapsed to just the icon; click to expand */
+  .search {
+    position: relative; display: flex; align-items: center; gap: 0;
+    width: 40px; height: 40px; padding: 0; justify-content: center; cursor: pointer; overflow: hidden;
+    background: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.03));
+    backdrop-filter: blur(22px) saturate(1.7); -webkit-backdrop-filter: blur(22px) saturate(1.7);
+    border: 1px solid rgba(255,255,255,.34);
+    border-radius: 12px; z-index: 2;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.42), inset 0 -1px 0 rgba(255,255,255,.08),
+                0 8px 26px -12px rgba(70,58,32,.3);
+    transition: width .28s cubic-bezier(.4,0,.2,1), gap .28s, border-color .15s;
+  }
+
+  /* cleanup button — hidden behind the search, slides out below on hover */
+  .cleanup-btn {
+    position: relative; z-index: 1; margin-top: 8px;
+    width: 40px; height: 40px; display: grid; place-items: center; cursor: pointer;
+    color: var(--ink-soft); border-radius: 12px;
+    background: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.03));
+    backdrop-filter: blur(22px) saturate(1.7); -webkit-backdrop-filter: blur(22px) saturate(1.7);
+    border: 1px solid rgba(255,255,255,.34);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.42), inset 0 -1px 0 rgba(255,255,255,.08),
+                0 8px 26px -12px rgba(70,58,32,.3);
+    opacity: 0; transform: translateY(-48px) scale(.85); pointer-events: none;
+    transition: opacity .26s ease, transform .32s cubic-bezier(.34,1.4,.5,1);
+  }
+  #tools:hover .cleanup-btn { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  .cleanup-btn:hover { color: var(--accent-ink); border-color: rgba(176,125,60,.5); }
+  .cleanup-btn.busy { color: var(--accent); pointer-events: none; }
+  .search.open { width: 250px; gap: 8px; padding: 0 13px; justify-content: flex-start; cursor: default; }
+  .search:focus-within { border-color: var(--accent); }
+  .search svg { flex-shrink: 0; color: var(--muted); }
+  .search input {
+    font: inherit; font-size: 13px; color: var(--ink); background: none; border: 0; outline: 0;
+    width: 0; opacity: 0; transition: opacity .2s .08s;
+  }
+  .search.open input { width: 100%; opacity: 1; }
+
+  /* left sidebar */
+  .sidebar {
+    position: fixed; top: 74px; left: 26px; z-index: 25; width: 210px; max-height: calc(100vh - 130px);
+    overflow-y: auto; padding: 6px 4px 20px; scrollbar-width: thin; scrollbar-color: var(--web) transparent;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; } .sidebar::-webkit-scrollbar-thumb { background: var(--web); border-radius: 4px; }
+  .sb-item {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 6px 10px; border-radius: 8px;
+    cursor: pointer; color: var(--ink-soft); font-size: 13.5px; transition: .12s; border: 1px solid transparent;
+  }
+  .sb-item:hover { background: rgba(255,255,255,.5); color: var(--ink); }
+  .sb-item[draggable="true"] { cursor: grab; }
+  .sb-item.dragging { opacity: .45; background: rgba(176,125,60,.1); cursor: grabbing; }
+  .sb-item.lit { color: var(--accent-ink); border-color: rgba(176,125,60,.35); background: rgba(176,125,60,.08); }
+  .sb-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-item .right { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+  .sb-item .n { font-size: 11px; color: var(--muted); }
+  .sb-item:hover .n { display: none; }                 /* count swaps to a big × on hover */
+  .sb-item .del {
+    width: 22px; height: 22px; border: 0; background: none; cursor: pointer; color: var(--muted);
+    font-size: 17px; line-height: 1; padding: 0; border-radius: 6px; display: none; place-items: center;
+  }
+  .sb-item:hover .del { display: grid; }
+  .sb-item .del:hover { color: #b23c2c; background: rgba(178,60,44,.14); }
+  .sb-edit {
+    flex: 1; min-width: 0; font: inherit; font-size: 13.5px; color: var(--ink);
+    background: rgba(255,255,255,.9); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 7px; outline: none;
+  }
+  .sb-add {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin-top: 3px; border-radius: 8px;
+    cursor: pointer; color: var(--muted); font-size: 12.5px; transition: .12s; border: 1px dashed transparent;
+  }
+  .sb-add:hover { color: var(--accent-ink); border-color: rgba(176,125,60,.32); background: rgba(176,125,60,.06); }
+  .sb-add .plus { font-size: 15px; line-height: 1; margin-top: -1px; }
+
+  #toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 40; background: var(--ink);
+    color: var(--paper); font-size: 12.5px; padding: 9px 16px; border-radius: 10px; opacity: 0; pointer-events: none;
+    transition: opacity .25s, transform .25s; box-shadow: 0 10px 30px -10px rgba(0,0,0,.5);
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+
+  /* ── zen mode: Unread at inbox zero — the chrome melts away and a daily
+     wallpaper takes over (Superhuman-style reward). Only on the Unread board;
+     Inspiration keeps its normal empty state. ── */
+  #zenbg { position: fixed; inset: 0; z-index: 4; background-size: cover; background-position: center;
+           opacity: 0; pointer-events: none; transition: opacity 1.6s ease; }
+  body.zen #zenbg.on { opacity: 1; }
+  .sidebar, #tools { transition: opacity .6s ease; }
+  body.zen .sidebar, body.zen #tools { opacity: 0; pointer-events: none; }
+  body.zen #canvas { opacity: 0; pointer-events: none; }   /* no hub/web flash under the wallpaper */
+  .wordmark { transition: color .8s ease; }
+  /* light-on-image wordmark only once the wallpaper has actually faded in */
+  body.zen:has(#zenbg.on) .wordmark { color: #fff; text-shadow: 0 1px 14px rgba(0,0,0,.45); }
+</style>
+</head>
+<body>
+
+<div class="wordmark">Trove</div>
+
+<div class="toggle" id="toggle">
+  <button data-board="backlog" class="active">Unread <span class="pill" id="c-backlog"></span></button>
+  <button data-board="inspiration">Inspiration</button>
+</div>
+
+<div id="tools">
+  <div class="search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+    <input id="search" placeholder="Find anything…" spellcheck="false">
+  </div>
+  <button class="cleanup-btn" id="cleanup" title="Tidy the board — re-arrange into a clean spiderweb">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M11.6 2.6a.5.5 0 0 1 .95 0l1.2 3.35a2 2 0 0 0 1.2 1.2l3.35 1.2a.5.5 0 0 1 0 .95l-3.35 1.2a2 2 0 0 0-1.2 1.2l-1.2 3.35a.5.5 0 0 1-.95 0l-1.2-3.35a2 2 0 0 0-1.2-1.2L5.75 9.85a.5.5 0 0 1 0-.95l3.35-1.2a2 2 0 0 0 1.2-1.2z"/><circle cx="18.5" cy="17.5" r="1.7"/><circle cx="6" cy="18" r="1.2"/></svg>
+  </button>
+</div>
+
+<nav class="sidebar" id="sidebar"></nav>
+
+<div id="viewport"><div id="canvas"></div></div>
+
+<div id="zenbg"></div>
+<div id="toast"></div>
+
+<!-- Your Supabase connection. Copy config.example.js → config.js and fill it in. -->
+<script src="config.js"></script>
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Trove — a living map. Two boards, one spiderweb aesthetic.
+   Links are auto-tagged into buckets (collection) server-side by the
+   save function; here each bucket is a bubble, each link a block that
+   plugs into its bubble with a cord you can snip / re-plug (the knob).
+   Curation (board / dragged pos / detached) persists in Supabase and
+   syncs across devices; the anon key may write only those columns.
+   Connection values come from config.js (see config.example.js).
+   ───────────────────────────────────────────────────────────── */
+if (!window.TROVE_CONFIG || !window.TROVE_CONFIG.SUPABASE_URL || !window.TROVE_CONFIG.SUPABASE_ANON) {
+  document.body.innerHTML = '<p style="font-family:system-ui;max-width:32rem;margin:15vh auto;padding:0 1.5rem;line-height:1.6;color:#333">' +
+    '<strong>Trove isn\'t configured yet.</strong><br>Copy <code>config.example.js</code> to <code>config.js</code> ' +
+    'and add your Supabase URL + anon key. See the README for the full setup.</p>';
+  throw new Error('Trove: config.js missing or incomplete');
+}
+const SUPABASE_URL  = window.TROVE_CONFIG.SUPABASE_URL;
+const SUPABASE_ANON = window.TROVE_CONFIG.SUPABASE_ANON;
+const TROVE_NAME    = window.TROVE_CONFIG.NAME || 'My Trove';
+const H = { apikey: SUPABASE_ANON, Authorization: 'Bearer ' + SUPABASE_ANON };
+
+const BOARD_META = {
+  backlog:     { name: 'Unread',    tag: '', hub: 'Unread' },
+  inspiration: { name: TROVE_NAME,  tag: '', hub: TROVE_NAME },
+};
+
+let links = [];
+let categories = [];          // [{ id, name, position }] — the editable sidebar list
+let currentBoard = 'backlog';
+let editingCat = false;       // pause the poll while a category is being edited
+let reorderingCat = false;    // pause the poll while the category list is being reordered
+
+/* ── data ── */
+async function load() {
+  try {
+    const [lr, cr] = await Promise.all([
+      fetch(SUPABASE_URL + '/rest/v1/links?select=*&order=created_at.desc&limit=800', { headers: H }),
+      fetch(SUPABASE_URL + '/rest/v1/collections?select=*&order=position,name', { headers: H }),
+    ]);
+    if (!lr.ok) throw new Error(lr.status + ' ' + lr.statusText);
+    links = (await lr.json()).map(row => ({
+      id: row.id, url: row.url, title: decodeEntities(row.title) || host(row.url) || 'Untitled', image: row.image || null,
+      description: decodeEntities(row.description) || null,
+      collection: row.collection ?? 'Inbox', status: row.status, board: row.board || 'backlog',
+      consumed: !!row.consumed, pos: row.pos || null, leaving: false, created_at: row.created_at,
+    }));
+    if (cr.ok) categories = await cr.json();
+    return true;
+  } catch (e) { console.warn('[trove] load failed', e); return false; }
+}
+async function patch(id, body) {
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/links?id=eq.' + id, {
+      method: 'PATCH', headers: { ...H, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(r.status);
+  } catch (e) { console.warn('[trove] save failed', e); toast('Couldn’t sync that change'); }
+}
+/* thin REST helpers for the collections table + re-filing links by category */
+function api(method, path, body) {
+  const opts = { method, headers: { ...H } };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.headers.Prefer = 'return=representation'; opts.body = JSON.stringify(body); }
+  else if (method !== 'GET') { opts.headers.Prefer = 'return=minimal'; }
+  return fetch(SUPABASE_URL + '/rest/v1' + path, opts).then(r => { if (!r.ok) throw new Error(r.status); return method === 'POST' ? r.json() : null; });
+}
+const refileLinks = (from, to) => api('PATCH', '/links?collection=eq.' + encodeURIComponent(from), { collection: to });
+
+/* ── helpers ── */
+function host(u) { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } }
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; }
+function decodeEntities(s) { const t = document.createElement('textarea'); t.innerHTML = String(s ?? ''); return t.value; }
+function isPoster(u) { return /(^|\.)imdb\.com$/.test(host(u)); }
+function srcKey(u) {                       // match on hostname, not substring (netfliX.com!)
+  const h = host(u);
+  if (/(^|\.)(youtube\.com|youtu\.be)$/.test(h)) return 'yt';
+  if (/(^|\.)(x\.com|twitter\.com)$/.test(h))    return 'x';
+  if (/(^|\.)imdb\.com$/.test(h))                return 'imdb';
+  if (/(^|\.)netflix\.com$/.test(h))             return 'nf';
+  if (/(^|\.)substack\.com$/.test(h))            return 'sub';
+  return 'web';
+}
+/* freeze animated thumbnails (gif / animated webp) to their first frame —
+   a canvas snapshot displays fine cross-origin, so nothing ever plays */
+function freezeFrame(img) {
+  if (!/\.(gif|webp|apng)(\?|#|$)/i.test(img.src)) return;
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    img.replaceWith(c);
+  } catch (_) { /* leave the img as-is */ }
+}
+
+const SRC_LABEL = { yt:'YouTube', x:'X', imdb:'IMDb', nf:'Netflix', sub:'Substack', web:'' };
+const SRC_BADGE = { yt:'b-yt', x:'b-x', imdb:'b-imdb', nf:'b-nf', sub:'b-sub', web:'b-web' };
+function badge(u) { const k = srcKey(u); const t = { yt:'YT', x:'X', imdb:'IMDb', nf:'NFLX', sub:'Sub', web:'Web' }[k]; return `<span class="badge ${SRC_BADGE[k]}">${t}</span>`; }
+
+/* X gives us only the tweet text (no image) via oEmbed — strip the trailing
+   "— Author (@handle) date" attribution and t.co / pic.twitter junk so the
+   card can show a clean quote. */
+function cleanTweet(title) {
+  return (title || '')
+    .replace(/\s*[—–]\s*[^—–]*\(@\w+\)[^—–]*$/, '')       // drop trailing author/date
+    .replace(/https?:\/\/t\.co\/\S+/gi, '')
+    .replace(/pic\.twitter\.com\/\S+/gi, '')
+    .replace(/\s+/g, ' ').trim();
+}
+function tweetHandle(l) {
+  const m = l.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]+)/i);
+  if (m && m[1].toLowerCase() !== 'i') return '@' + m[1];
+  const t = (l.title || '').match(/\(@(\w+)\)/);
+  return t ? '@' + t[1] : '';
+}
+
+/* curved cord between two points (gentle bow = flexible feel) */
+function cord(x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2, dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len, bow = Math.min(46, len * 0.14);
+  return `M ${x1} ${y1} Q ${mx + nx * bow} ${my + ny * bow} ${x2} ${y2}`;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   LAYOUT — hub bubble in the middle, one bucket bubble per collection
+   radiating out, each card fanning from (and plugged into) its bubble.
+   ───────────────────────────────────────────────────────────── */
+const CARD_W = 190, CARD_H = 176, GAP = 18, PER_ROW = 2;
+function boardItems(board) { return links.filter(l => l.board === board && !l.consumed && !l.leaving); }
+function categoryNames() {              // table order, then any stragglers
+  const named = categories.map(c => c.name);
+  const extras = [...new Set(links.map(l => l.collection))].filter(c => c && !named.includes(c));
+  return [...named, ...extras];
+}
+/* a bubble's dragged position for a board, if any (stored per-board on its row) */
+function bubblePos(name, board) {
+  const cat = categories.find(c => c.name === name);
+  const p = cat && cat.pos && cat.pos[board];
+  return p && Number.isFinite(p.x) ? p : null;
+}
+function grouped(board) {
+  const byCol = {};
+  for (const l of boardItems(board)) (byCol[l.collection] ??= []).push(l);
+  // draw a bucket if it has links here, OR if it's been placed on this board
+  // by hand (dragged out from the sidebar) — those stay as empty drop targets.
+  const cols = categoryNames().filter(c => byCol[c]?.length || bubblePos(c, board));
+  return { byCol, cols };
+}
+function clusterSize(n) {
+  if (n === 0) return { w: CARD_W, h: 0, perRow: 1, rows: 0 };   // empty, hand-placed bucket
+  const perRow = Math.min(PER_ROW, n), rows = Math.ceil(n / perRow);
+  return { w: perRow * CARD_W + (perRow - 1) * GAP, h: rows * CARD_H + (rows - 1) * GAP, perRow, rows };
+}
+function knobPoint(x, y) { return { x: x + CARD_W / 2, y: y - 8 }; }   // where the cord plugs in
+
+function layout(board) {
+  const { byCol, cols } = grouped(board);
+  const N = cols.length || 1;
+  const hub = { x: 0, y: 0 };
+  const nodes = [], cords = [], bubbles = [], anchors = {};
+
+  let maxHalf = 0;
+  const sizes = cols.map(c => { const s = clusterSize(byCol[c]?.length || 0); maxHalf = Math.max(maxHalf, Math.hypot(s.w, s.h) / 2); return s; });
+  const RADIUS = Math.max(470, maxHalf + 340);
+
+  cols.forEach((c, i) => {
+    const items = byCol[c] || [], s = sizes[i];
+    const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+    let cx = Math.cos(angle) * RADIUS, cy = Math.sin(angle) * RADIUS;
+    let bx = cx - Math.cos(angle) * (s.h / 2 + 54), by = cy - Math.sin(angle) * (s.h / 2 + 54);
+    // a dragged bubble carries its whole cluster: shift cx/cy by the same delta
+    // so the auto-arranged cards keep their spot relative to the bubble
+    const moved = bubblePos(c, board);
+    if (moved) { cx += moved.x - bx; cy += moved.y - by; bx = moved.x; by = moved.y; }
+    const ox = cx - s.w / 2, oy = cy - s.h / 2;
+    const bub = { x: bx, y: by };
+    anchors[c] = { cx, cy, bx, by };
+
+    cords.push({ trunk: true, col: c, d: cord(hub.x, hub.y, bub.x, bub.y) });
+    bubbles.push({ c, n: items.length, x: bub.x, y: bub.y });
+
+    items.forEach((l, k) => {
+      const auto = { x: ox + (k % s.perRow) * (CARD_W + GAP), y: oy + Math.floor(k / s.perRow) * (CARD_H + GAP) };
+      const p = l.pos && Number.isFinite(l.pos.x) ? l.pos : auto;
+      const detached = !!(l.pos && l.pos.detached);
+      nodes.push({ type: 'card', link: l, x: p.x, y: p.y, detached, bub });
+      if (!detached) { const kp = knobPoint(p.x, p.y); cords.push({ id: l.id, d: cord(bub.x, bub.y, kp.x, kp.y) }); }
+    });
+  });
+
+  // loose cards — links whose category was deleted (collection '') stay on
+  // the map, unlabelled and unplugged, frozen where they were.
+  const loose = boardItems(board).filter(l => !categoryNames().includes(l.collection));
+  loose.forEach((l, k) => {
+    const auto = { x: -320 + (k % 5) * (CARD_W + GAP), y: 660 + Math.floor(k / 5) * (CARD_H + GAP) };
+    const p = l.pos && Number.isFinite(l.pos.x) ? l.pos : auto;
+    nodes.push({ type: 'card', link: l, x: p.x, y: p.y, detached: true, loose: true });
+  });
+
+  let minX = -220, minY = -150, maxX = 220, maxY = 150;
+  for (const n of nodes) if (n.type === 'card') {
+    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y - 40);
+    maxX = Math.max(maxX, n.x + CARD_W); maxY = Math.max(maxY, n.y + CARD_H);
+  }
+  for (const b of bubbles) {             // keep hand-placed (incl. empty) buckets inside the fit view
+    minX = Math.min(minX, b.x - 90); minY = Math.min(minY, b.y - 30);
+    maxX = Math.max(maxX, b.x + 90); maxY = Math.max(maxY, b.y + 30);
+  }
+  const pad = 170;
+  const bounds = { x: minX - pad, y: minY - pad, w: (maxX - minX) + pad * 2, h: (maxY - minY) + pad * 2 };
+  return { nodes, cords, bubbles, hub, bounds, anchors };
+}
+
+/* ── render ── */
+const canvas = document.getElementById('canvas');
+let lastLayout = null, lastBounds = { x: -600, y: -400, w: 1200, h: 800 };
+
+function render() {
+  const L = layout(currentBoard);
+  lastLayout = L; lastBounds = L.bounds;
+  const meta = BOARD_META[currentBoard];
+
+  const web = `<svg id="web" width="1" height="1">` +
+    L.cords.map(c => `<path class="${c.trunk ? 'trunk' : 'tether'}" ${c.id ? `data-cord="${c.id}"` : ''}${c.col ? ` data-trunk="${esc(c.col)}"` : ''} d="${c.d}"/>`).join('') + `</svg>`;
+
+  const hub = `<div class="hub" style="left:${L.hub.x}px;top:${L.hub.y}px">
+      <span class="dot"></span><span class="txt"><span class="name">${esc(meta.hub)}</span>${meta.tag ? `<span class="tag">${esc(meta.tag)}</span>` : ''}</span></div>`;
+
+  const bubbles = L.bubbles.map(b =>
+    `<div class="bubble" data-col="${esc(b.c)}" style="left:${b.x}px;top:${b.y}px">${esc(b.c)}<span class="tcount">${b.n}</span></div>`).join('');
+
+  const cards = L.nodes.map(n => {
+    const l = n.link, d = host(l.url), poster = isPoster(l.url), k = srcKey(l.url);
+    const thumb = l.image
+      ? `<div class="thumb${poster ? ' poster' : ''}"><img src="${esc(l.image)}" alt="" loading="lazy" onload="freezeFrame(this)"
+           onerror="this.parentNode.classList.add('text','s-${k}');this.parentNode.classList.remove('poster');this.outerHTML='<span class=&quot;tsrc&quot;>${SRC_LABEL[k] || esc(d)}</span>'"></div>`
+      : `<div class="thumb text s-${k}"><span class="tsrc">${SRC_LABEL[k] || esc(d)}</span></div>`;
+    const acts = currentBoard === 'backlog'
+      ? `<button class="promote" data-act="promote" data-id="${l.id}" title="Promote to Inspiration">★</button>
+         <button class="consume" data-act="consume" data-id="${l.id}" title="Mark as read / done">✓</button>`
+      : `<button class="demote" data-act="demote" data-id="${l.id}" title="Move back to Unread">↩</button>`;
+    const star = currentBoard === 'inspiration' ? `<div class="startag">★</div>` : '';
+    // every card carries a knob — loose cards (category deleted) get an always-off
+    // knob so there's still a circle to drag onto a bucket and re-file them.
+    const knob = `<div class="knob${n.detached ? ' off' : ''}" data-knob="${l.id}" title="${n.loose ? 'Drag me to a bucket to file it' : n.detached ? 'Drag me to a bucket to re-plug · click to snap back' : 'Unplug from the web'}"></div>`;
+
+    // X has no image — render the tweet as a clean quote instead of a blank card
+    const isX = k === 'x' && !l.image;
+    let inner;
+    if (isX) {
+      const quote = cleanTweet(l.title), handle = tweetHandle(l), who = l.description || '';
+      const meta = [who, handle].filter(Boolean).join(' · ');
+      inner = `<div class="inner xquote">${star}
+          <div class="qmark">“</div>
+          <div class="qtext">${esc(quote || 'Shared a post')}</div>
+          <div class="qmeta"><span class="badge b-x">X</span><span class="qhandle">${esc(meta)}</span></div>
+        </div>`;
+    } else {
+      inner = `<div class="inner"><div class="thumb-wrap">${thumb}</div>${star}
+          <div class="body"><div class="title">${esc(l.title)}</div>
+            <div class="foot">${badge(l.url)}<span class="domain">${esc(d)}</span></div></div></div>`;
+    }
+    return `<div class="card${isX ? ' xcard' : ''}${l.leaving ? ' leaving' : ''}" data-id="${l.id}" style="left:${n.x}px;top:${n.y}px">
+        ${knob}${inner}
+        <div class="acts">${acts}</div>
+      </div>`;
+  }).join('');
+
+  canvas.innerHTML = web + hub + bubbles + cards;
+  buildSidebar();
+  updateCounts();
+  applySearch();
+  checkEmpty();
+}
+
+function updateCounts() { const n = boardItems('backlog').length; document.getElementById('c-backlog').textContent = n >= 1 ? n : ''; }
+
+function buildSidebar() {
+  const byCol = {};
+  for (const l of boardItems(currentBoard)) (byCol[l.collection] ??= []).push(l);
+  document.getElementById('sidebar').innerHTML =
+    categoryNames().map(c => {
+      const n = (byCol[c] || []).length;
+      const real = categories.some(cat => cat.name === c);   // only table rows can persist an order
+      return `<div class="sb-item" data-goto="${esc(c)}"${real ? ' draggable="true"' : ''}>
+        <span class="label" title="Drag to reorder · double-click to rename">${esc(c)}</span>
+        <span class="right"><span class="n">${n}</span><button class="del" data-del="${esc(c)}" title="Delete category">×</button></span>
+      </div>`;
+    }).join('') + `<div class="sb-add" id="sb-add"><span class="plus">+</span><span>Add category</span></div>`;
+}
+
+/* ── pan / zoom / fit ── */
+const viewport = document.getElementById('viewport');
+let scale = 0.8, tx = 0, ty = 0;
+const MIN = 0.16, MAX = 2.2, FAR = 0.42;
+function apply() {
+  canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+  canvas.classList.toggle('far', scale < FAR);
+  const gap = 26 * scale, r = Math.max(0.8, 1.05 * scale);
+  viewport.style.backgroundImage =
+    `radial-gradient(circle at 22% 12%, rgba(255,252,244,.55), transparent 42%),` +
+    `radial-gradient(circle at 82% 88%, rgba(210,200,176,.35), transparent 46%),` +
+    `radial-gradient(circle at center, rgba(170,157,124,.42) ${r}px, transparent ${r}px)`;
+  viewport.style.backgroundSize = `auto, auto, ${gap}px ${gap}px`;
+  viewport.style.backgroundPosition = `0 0, 0 0, ${tx}px ${ty}px`;
+}
+function zoomAt(cx, cy, factor) {
+  const ns = Math.max(MIN, Math.min(MAX, scale * factor));
+  const wx = (cx - tx) / scale, wy = (cy - ty) / scale;
+  scale = ns; tx = cx - wx * scale; ty = cy - wy * scale; apply();
+}
+function fitView() {                     // compute the "see everything" view without applying it
+  const b = lastBounds, vw = innerWidth, vh = innerHeight, padL = 250, padR = 60, padV = 90;
+  const s = Math.max(MIN, Math.min(1, Math.min((vw - padL - padR) / b.w, (vh - padV * 2) / b.h)));
+  return { scale: s, tx: padL + (vw - padL - padR - b.w * s) / 2 - b.x * s,
+           ty: padV + (vh - padV * 2 - b.h * s) / 2 - b.y * s };
+}
+function fit() { const v = fitView(); scale = v.scale; tx = v.tx; ty = v.ty; apply(); }
+function flyTo(wx, wy, ts) { if (ts) scale = Math.max(MIN, Math.min(MAX, ts)); tx = innerWidth / 2 - wx * scale; ty = innerHeight / 2 - wy * scale; apply(); }
+
+/* ── tidy-up: re-arrange into the clean spiderweb, then glide the camera
+   out to fit — a smooth settle, no spin.
+   cleanup=true first clears every dragged position so it settles into the
+   tidy default layout (persisted); cleanup=false is purely aesthetic and
+   leaves the blocks exactly where they were. ── */
+let animating = false;
+const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function spinBoard(cleanup) {
+  if (animating) return;
+  if (cleanup) {
+    const affected = links.filter(l => l.board === currentBoard && !l.consumed && l.pos);
+    affected.forEach(l => l.pos = null);        // back to auto-arranged positions
+    render();                                   // recompute the tidy layout + bounds
+    affected.forEach(l => patch(l.id, { pos: null }));   // persist the tidy-up
+    if (!affected.length) toast('Already tidy');
+  }
+  const target = fitView();
+  const start = { scale, tx, ty };              // glide from wherever the camera is now
+  animating = true;
+  const T = 850, t0 = performance.now();
+  (function frame(now) {
+    const p = Math.min(1, (now - t0) / T);
+    const vp = easeInOutCubic(p);
+    scale = start.scale + (target.scale - start.scale) * vp;
+    tx = start.tx + (target.tx - start.tx) * vp;
+    ty = start.ty + (target.ty - start.ty) * vp;
+    apply();
+    if (p < 1) requestAnimationFrame(frame);
+    else { scale = target.scale; tx = target.tx; ty = target.ty; apply(); animating = false; }
+  })(performance.now());
+}
+
+viewport.addEventListener('wheel', e => { e.preventDefault(); const d = Math.max(-40, Math.min(40, e.deltaY)); zoomAt(e.clientX, e.clientY, Math.exp(-d * 0.0025)); }, { passive: false });
+
+let panning = false, moved = 0, px = 0, py = 0;
+viewport.addEventListener('mousedown', e => { if (e.button !== 0) return; panning = true; moved = 0; px = e.clientX; py = e.clientY; viewport.classList.add('grabbing'); });
+window.addEventListener('mousemove', e => { if (!panning) return; const dx = e.clientX - px, dy = e.clientY - py; moved += Math.abs(dx) + Math.abs(dy); tx += dx; ty += dy; px = e.clientX; py = e.clientY; apply(); });
+window.addEventListener('mouseup', () => { panning = false; viewport.classList.remove('grabbing'); });
+/* ── drag a block; its cord flexes to follow ── */
+let cardDrag = null, dragJustHappened = false;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (e.target.closest('button') || e.target.closest('.knob')) return;
+  const card = e.target.closest('.card'); if (!card) return;
+  e.stopPropagation(); e.preventDefault();
+  const l = links.find(x => x.id === card.dataset.id);
+  const node = lastLayout.nodes.find(n => n.link.id === l.id);
+  cardDrag = { el: card, l, bub: node.bub, sx: e.clientX, sy: e.clientY, ox: parseFloat(card.style.left), oy: parseFloat(card.style.top), moved: 0 };
+  card.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if (!cardDrag) return;
+  cardDrag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+  const nx = cardDrag.ox + (e.clientX - cardDrag.sx) / scale, ny = cardDrag.oy + (e.clientY - cardDrag.sy) / scale;
+  cardDrag.el.style.left = nx + 'px'; cardDrag.el.style.top = ny + 'px'; cardDrag.cur = { x: nx, y: ny };
+  const path = canvas.querySelector(`path[data-cord="${cardDrag.l.id}"]`);
+  if (path) { const kp = knobPoint(nx, ny); path.setAttribute('d', cord(cardDrag.bub.x, cardDrag.bub.y, kp.x, kp.y)); }
+});
+window.addEventListener('mouseup', () => {
+  if (!cardDrag) return;
+  cardDrag.el.classList.remove('dragging');
+  if (cardDrag.moved > 3 && cardDrag.cur) {
+    const detached = !!(cardDrag.l.pos && cardDrag.l.pos.detached);
+    cardDrag.l.pos = { x: cardDrag.cur.x, y: cardDrag.cur.y, detached };
+    patch(cardDrag.l.id, { pos: cardDrag.l.pos }); dragJustHappened = true;
+  }
+  cardDrag = null;
+});
+
+/* ── drag a whole sub-category bubble; its auto-arranged cards travel with it,
+   every cord flexing to follow. Position persists per-board on the row. ── */
+let bubbleDrag = null, bubbleDragJustHappened = false;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || cardDrag) return;
+  const bubEl = e.target.closest('.bubble'); if (!bubEl) return;
+  e.stopPropagation(); e.preventDefault();
+  const name = bubEl.dataset.col;
+  // gather this bubble's cards: auto-arranged ones ride along; individually
+  // placed ones stay put but keep their cord tethered to the moving bubble
+  const kids = lastLayout.nodes
+    .filter(n => n.type === 'card' && n.link.collection === name)
+    .map(n => {
+      const el = canvas.querySelector('.card[data-id="' + n.link.id + '"]'); if (!el) return null;
+      const explicit = !!(n.link.pos && Number.isFinite(n.link.pos.x));
+      return { el, id: n.link.id, ox: parseFloat(el.style.left), oy: parseFloat(el.style.top),
+               moves: !explicit, plugged: !(n.link.pos && n.link.pos.detached) };
+    }).filter(Boolean);
+  const trunk = canvas.querySelector('path[data-trunk="' + (window.CSS ? CSS.escape(name) : name) + '"]');
+  bubbleDrag = { el: bubEl, name, sx: e.clientX, sy: e.clientY,
+    ox: parseFloat(bubEl.style.left), oy: parseFloat(bubEl.style.top), moved: 0, kids, trunk };
+  bubEl.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if (!bubbleDrag) return;
+  bubbleDrag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+  const dx = (e.clientX - bubbleDrag.sx) / scale, dy = (e.clientY - bubbleDrag.sy) / scale;
+  const bnx = bubbleDrag.ox + dx, bny = bubbleDrag.oy + dy;
+  bubbleDrag.el.style.left = bnx + 'px'; bubbleDrag.el.style.top = bny + 'px';
+  bubbleDrag.cur = { x: bnx, y: bny };
+  if (bubbleDrag.trunk) bubbleDrag.trunk.setAttribute('d', cord(0, 0, bnx, bny));
+  bubbleDrag.kids.forEach(k => {
+    let kx = k.ox, ky = k.oy;
+    if (k.moves) { kx += dx; ky += dy; k.el.style.left = kx + 'px'; k.el.style.top = ky + 'px'; }
+    if (k.plugged) {
+      const path = canvas.querySelector('path[data-cord="' + k.id + '"]');
+      if (path) { const kp = knobPoint(kx, ky); path.setAttribute('d', cord(bnx, bny, kp.x, kp.y)); }
+    }
+  });
+});
+window.addEventListener('mouseup', e => {
+  if (!bubbleDrag) return;
+  bubbleDrag.el.classList.remove('dragging');
+  if (bubbleDrag.moved > 3 && bubbleDrag.cur) {
+    // an empty, hand-placed bucket dragged back onto the sidebar → take it off the board
+    if (!bubbleDrag.kids.length && e.clientX <= sidebarEl.getBoundingClientRect().right + 8) {
+      const name = bubbleDrag.name;
+      bubbleDragJustHappened = true; bubbleDrag = null;
+      clearBubblePos(name); render(); toast('“' + name + '” removed from the board');
+      return;
+    }
+    saveBubblePos(bubbleDrag.name, bubbleDrag.cur);
+    bubbleDragJustHappened = true;
+    bubbleDrag = null;
+    render();     // rebuild lastLayout so cords/cards anchor to the bubble's NEW spot
+    return;
+  }
+  bubbleDrag = null;
+});
+function saveBubblePos(name, pos) {
+  const cat = categories.find(c => c.name === name);
+  if (!cat) { toast('Can’t move this bucket yet'); return; }     // extra bucket, no row to store on
+  cat.pos = { ...(cat.pos || {}), [currentBoard]: { x: pos.x, y: pos.y } };
+  api('PATCH', '/collections?id=eq.' + cat.id, { pos: cat.pos }).catch(() => toast('Couldn’t save that move'));
+}
+function clearBubblePos(name) {                                 // drop a hand-placed bucket off this board
+  const cat = categories.find(c => c.name === name);
+  if (!cat || !cat.pos) return;
+  const { [currentBoard]: _drop, ...rest } = cat.pos;
+  cat.pos = rest;
+  api('PATCH', '/collections?id=eq.' + cat.id, { pos: cat.pos }).catch(() => toast('Couldn’t update that'));
+}
+
+/* ── re-plug a detached card by dragging a line out of its knob to a bucket.
+   Drop on its own bucket to snap back, or on a different one to re-file it.
+   (A plain click on the knob still snaps it back to its current bucket.) ── */
+let plugDrag = null;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || cardDrag || bubbleDrag) return;
+  const knob = e.target.closest('.knob.off'); if (!knob) return;
+  e.stopPropagation(); e.preventDefault();
+  const l = links.find(x => x.id === knob.dataset.knob);
+  const card = knob.closest('.card');
+  const start = knobPoint(parseFloat(card.style.left), parseFloat(card.style.top));
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('class', 'plugline');
+  document.getElementById('web').appendChild(path);
+  path.setAttribute('d', cord(start.x, start.y, start.x, start.y));
+  plugDrag = { l, card, start, path, target: null, moved: 0 };
+  card.classList.add('plugging');
+});
+window.addEventListener('mousemove', e => {
+  if (!plugDrag) return;
+  plugDrag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+  const wx = (e.clientX - tx) / scale, wy = (e.clientY - ty) / scale;
+  plugDrag.path.setAttribute('d', cord(plugDrag.start.x, plugDrag.start.y, wx, wy));
+  const bub = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.bubble') || null;
+  if (bub !== plugDrag.target) {
+    plugDrag.target?.classList.remove('plug-target');
+    (plugDrag.target = bub)?.classList.add('plug-target');
+  }
+});
+window.addEventListener('mouseup', () => {
+  if (!plugDrag) return;
+  const { l, card, target } = plugDrag;
+  plugDrag.path.remove();
+  card.classList.remove('plugging');
+  target?.classList.remove('plug-target');
+  plugDrag = null;
+  const col = target && target.dataset.col;
+  if (!col) return;                                   // released off a bucket → stays detached
+  const p = l.pos && Number.isFinite(l.pos.x) ? l.pos : { x: parseFloat(card.style.left), y: parseFloat(card.style.top) };
+  const refiled = col !== l.collection;
+  l.pos = { x: p.x, y: p.y, detached: false };
+  if (refiled) l.collection = col;
+  patch(l.id, refiled ? { pos: l.pos, collection: l.collection } : { pos: l.pos });
+  render();
+  toast(refiled ? 'Re-filed into “' + col + '”' : 'Plugged back in');
+});
+
+/* ── click: knob toggles the cord · buttons · open ── */
+canvas.addEventListener('click', e => {
+  const knob = e.target.closest('.knob');
+  if (knob) {
+    const l = links.find(x => x.id === knob.dataset.knob);
+    if (!categoryNames().includes(l.collection)) return;   // loose card: knob is drag-only, no toggle
+    const card = knob.closest('.card');
+    const pos = l.pos && Number.isFinite(l.pos.x) ? l.pos : { x: parseFloat(card.style.left), y: parseFloat(card.style.top) };
+    const nowDetached = !(l.pos && l.pos.detached);
+    l.pos = { x: pos.x, y: pos.y, detached: nowDetached };
+    patch(l.id, { pos: l.pos }); render();
+    toast(nowDetached ? 'Unplugged from the web' : 'Plugged back in');
+    return;
+  }
+  if (moved > 4) return;
+  if (dragJustHappened) { dragJustHappened = false; return; }
+  const btn = e.target.closest('button[data-act]');
+  if (btn) {
+    const l = links.find(x => x.id === btn.dataset.id), card = btn.closest('.card'), act = btn.dataset.act;
+    if (act === 'consume') { l.leaving = true; card.classList.add('leaving'); patch(l.id, { consumed: true }); setTimeout(() => { l.consumed = true; render(); }, 320); }
+    else if (act === 'promote') { l.leaving = true; card.classList.add('leaving'); patch(l.id, { board: 'inspiration', pos: null }); setTimeout(() => { l.board = 'inspiration'; l.pos = null; l.leaving = false; render(); toast('★ Graduated to Inspiration'); }, 320); }
+    else if (act === 'demote') { l.leaving = true; card.classList.add('leaving'); patch(l.id, { board: 'backlog', pos: null }); setTimeout(() => { l.board = 'backlog'; l.pos = null; l.leaving = false; render(); toast('Moved back to Unread'); }, 320); }
+    return;
+  }
+  const card = e.target.closest('.card');
+  if (card) window.open(links.find(x => x.id === card.dataset.id).url, '_blank', 'noopener');
+});
+
+/* ── toggle ── */
+document.getElementById('toggle').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  currentBoard = btn.dataset.board;
+  [...e.currentTarget.children].forEach(b => b.classList.toggle('active', b === btn));
+  render(); fit();
+});
+
+/* ── sidebar: fly-to · rename (double-click) · add (+) · delete (×) ── */
+const sidebarEl = document.getElementById('sidebar');
+sidebarEl.addEventListener('click', e => {
+  if (catReorderJustHappened) { catReorderJustHappened = false; return; }   // the click that ends a reorder drag
+  const del = e.target.closest('.del');
+  if (del) { e.stopPropagation(); deleteCategory(del.dataset.del); return; }
+  if (e.target.closest('#sb-add')) { startAddCategory(); return; }
+  if (e.target.closest('.sb-edit')) return;                      // clicking inside an input
+  const item = e.target.closest('.sb-item'); if (!item || !lastLayout) return;
+  const a = lastLayout.anchors[item.dataset.goto];
+  if (!a) { toast('No links here yet'); return; }                // empty category
+  flyTo(a.cx, a.cy, Math.max(scale, 0.7));
+  document.querySelectorAll('.sb-item').forEach(x => x.classList.toggle('lit', x === item));
+  document.querySelectorAll('.bubble').forEach(b => b.classList.toggle('lit', b.dataset.col === item.dataset.goto));
+});
+sidebarEl.addEventListener('dblclick', e => {
+  const label = e.target.closest('.label'); if (!label) return;
+  startRenameCategory(label.closest('.sb-item'));
+});
+
+/* ── drag to reorder the category list; new order persists via `position` ── */
+let draggingItem = null, catReorderJustHappened = false;
+function dropTarget(y) {                         // the item the cursor sits above (else null = end)
+  const els = [...sidebarEl.querySelectorAll('.sb-item[draggable="true"]:not(.dragging)')];
+  return els.reduce((best, el) => {
+    const box = el.getBoundingClientRect(), offset = y - box.top - box.height / 2;
+    return (offset < 0 && offset > best.offset) ? { offset, el } : best;
+  }, { offset: -Infinity, el: null }).el;
+}
+sidebarEl.addEventListener('dragstart', e => {
+  const item = e.target.closest('.sb-item');
+  if (!item || item.getAttribute('draggable') !== 'true' || e.target.closest('.del')) { e.preventDefault(); return; }
+  draggingItem = item; reorderingCat = true;
+  item.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', item.dataset.goto); } catch (_) {}
+});
+sidebarEl.addEventListener('dragover', e => {
+  if (!draggingItem) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const after = dropTarget(e.clientY);
+  sidebarEl.insertBefore(draggingItem, after || document.getElementById('sb-add'));
+});
+// dragging a category out over the board (not the sidebar) counts as "place it here"
+const overSidebar = x => x <= sidebarEl.getBoundingClientRect().right + 8;
+viewport.addEventListener('dragover', e => { if (draggingItem && !overSidebar(e.clientX)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+sidebarEl.addEventListener('dragend', e => {
+  if (!draggingItem) return;
+  const item = draggingItem, name = item.dataset.goto;
+  item.classList.remove('dragging');
+  draggingItem = null; reorderingCat = false;
+  if (!overSidebar(e.clientX)) {                    // dropped onto the board → pin a bubble there
+    buildSidebar();                                 // discard any transient reorder from the drag
+    const wx = (e.clientX - tx) / scale, wy = (e.clientY - ty) / scale;
+    saveBubblePos(name, { x: wx, y: wy });
+    render();
+    toast('“' + name + '” added to the board');
+    return;
+  }
+  catReorderJustHappened = true;
+  commitCatOrder();
+});
+function commitCatOrder() {
+  const changed = [];
+  [...sidebarEl.querySelectorAll('.sb-item[data-goto]')].forEach((el, i) => {
+    const cat = categories.find(c => c.name === el.dataset.goto);
+    if (cat && cat.position !== i) { cat.position = i; changed.push(cat); }
+  });
+  categories.sort((a, b) => a.position - b.position);          // keep memory in the new order
+  changed.forEach(cat => api('PATCH', '/collections?id=eq.' + cat.id, { position: cat.position }).catch(() => toast('Couldn’t save the order')));
+  if (changed.length) toast('Reordered');
+}
+
+/* swap a label / add-row for an input; commit on Enter or blur, cancel on Esc */
+function inlineEdit(host, initial, placeholder, onCommit) {
+  editingCat = true;
+  const input = document.createElement('input');
+  input.className = 'sb-edit'; input.value = initial; input.placeholder = placeholder || ''; input.spellcheck = false;
+  host.replaceWith(input); input.focus(); input.select();
+  let done = false;
+  const finish = ok => {
+    if (done) return; done = true; editingCat = false;
+    if (ok) onCommit(input.value.trim()); else buildSidebar();
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') input.blur();
+    else if (ev.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function startRenameCategory(item) {
+  const oldName = item.dataset.goto;
+  inlineEdit(item.querySelector('.label'), oldName, '', async newName => {
+    if (!newName || newName === oldName) return buildSidebar();
+    if (categoryNames().some(c => c.toLowerCase() === newName.toLowerCase())) { toast('That name’s taken'); return buildSidebar(); }
+    const cat = categories.find(c => c.name === oldName);
+    if (cat) cat.name = newName;                                 // optimistic — cascade everywhere
+    links.forEach(l => { if (l.collection === oldName) l.collection = newName; });
+    render();
+    try {
+      if (cat) await api('PATCH', '/collections?id=eq.' + cat.id, { name: newName });
+      await refileLinks(oldName, newName);
+      toast('Renamed to “' + newName + '”');
+    } catch (_) { toast('Couldn’t save the rename'); }
+  });
+}
+
+function startAddCategory() {
+  const addRow = document.getElementById('sb-add');
+  const holder = document.createElement('div'); holder.className = 'sb-item';
+  addRow.replaceWith(holder);
+  inlineEdit(holder, '', 'New category…', async name => {
+    if (!name) return buildSidebar();
+    if (categoryNames().some(c => c.toLowerCase() === name.toLowerCase())) { toast('That name’s taken'); return buildSidebar(); }
+    const position = categories.reduce((m, c) => Math.max(m, c.position), 0) + 1;
+    try {
+      const [row] = await api('POST', '/collections', { name, position });
+      categories.push(row); render(); toast('Added “' + name + '”');
+    } catch (_) { toast('Couldn’t add that category'); buildSidebar(); }
+  });
+}
+
+async function deleteCategory(name) {
+  const cat = categories.find(c => c.name === name);
+  const affected = links.filter(l => l.collection === name);
+  // keep the links: freeze each where it sits, then orphan it (no category)
+  affected.forEach(l => {
+    const node = lastLayout && lastLayout.nodes.find(n => n.link && n.link.id === l.id);
+    if (node) l.pos = { x: node.x, y: node.y };
+    l.collection = '';                                           // '' = loose, no label
+  });
+  categories = categories.filter(c => c.name !== name);          // optimistic
+  render();
+  try {
+    await Promise.all(affected.map(l => patch(l.id, l.pos ? { collection: '', pos: l.pos } : { collection: '' })));
+    if (cat) await api('DELETE', '/collections?id=eq.' + cat.id);
+    toast(affected.length ? `Deleted — ${affected.length} link${affected.length > 1 ? 's' : ''} kept` : 'Category deleted');
+  } catch (_) { toast('Couldn’t delete that'); }
+}
+/* bubble click also flies + lights */
+canvas.addEventListener('click', e => {
+  const b = e.target.closest('.bubble'); if (!b || !lastLayout) return;
+  if (bubbleDragJustHappened) { bubbleDragJustHappened = false; return; }
+  const a = lastLayout.anchors[b.dataset.col]; if (!a) return;
+  flyTo(a.cx, a.cy, Math.max(scale, 0.7));
+  document.querySelectorAll('.bubble').forEach(x => x.classList.toggle('lit', x === b));
+  document.querySelectorAll('.sb-item').forEach(x => x.classList.toggle('lit', x.dataset.goto === b.dataset.col));
+});
+
+/* ── search: icon-only until clicked ── */
+const searchEl = document.getElementById('search');
+const searchBox = document.querySelector('.search');
+searchEl.addEventListener('input', applySearch);
+searchBox.addEventListener('click', () => {
+  if (!searchBox.classList.contains('open')) { searchBox.classList.add('open'); setTimeout(() => searchEl.focus(), 120); }
+});
+document.addEventListener('click', e => {   // click elsewhere collapses (if empty)
+  if (!searchBox.contains(e.target) && !searchEl.value.trim()) searchBox.classList.remove('open');
+});
+searchEl.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { searchEl.value = ''; applySearch(); searchBox.classList.remove('open'); searchEl.blur(); }
+});
+
+/* ── cleanup button (draws out under the search on hover) ── */
+const cleanupBtn = document.getElementById('cleanup');
+cleanupBtn.addEventListener('click', () => {
+  if (animating) return;
+  cleanupBtn.classList.add('busy');
+  spinBoard(true);
+  setTimeout(() => cleanupBtn.classList.remove('busy'), 900);
+});
+function applySearch() {
+  const q = searchEl.value.trim().toLowerCase();
+  const cards = [...canvas.querySelectorAll('.card')];
+  if (!q) { cards.forEach(c => c.classList.remove('dimmed')); return; }
+  let first = null;
+  cards.forEach(c => {
+    const l = links.find(x => x.id === c.dataset.id);
+    const hit = (l.title + ' ' + l.collection + ' ' + host(l.url)).toLowerCase().includes(q);
+    c.classList.toggle('dimmed', !hit); if (hit && !first) first = c;
+  });
+  if (first) flyTo(parseFloat(first.style.left) + CARD_W / 2, parseFloat(first.style.top) + CARD_H / 2, scale);
+}
+
+/* ── daily wallpaper for zen mode ──
+   Deterministic pick per local day: the deck is shuffled once per cycle
+   (seeded by cycle number) and walked through day by day, so an image never
+   repeats until every other one has had its day. ── */
+const WALLS = ['wall-01.jpg','wall-02.jpg','wall-03.jpg','wall-04.jpg','wall-05.jpg',
+               'wall-06.jpg','wall-07.jpg','wall-08.jpg','wall-09.jpg'];
+function shuffledCycle(cycle) {                                  // seeded shuffle (mulberry32)
+  let s = (cycle * 2654435761 + 1013904223) >>> 0;
+  const rnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const idx = WALLS.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+  return idx;
+}
+function dailyWall() {
+  const d = new Date();
+  const day = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
+  const cycle = Math.floor(day / WALLS.length), pos = day % WALLS.length;
+  const idx = shuffledCycle(cycle);
+  // seam fix: the first 3 days of a cycle mustn't echo the last 3 of the
+  // previous one — swap conflicts into mid-cycle slots. Only positions 0–5
+  // are ever touched, so every cycle's tail stays canonical.
+  const tail = shuffledCycle(cycle - 1).slice(-3);
+  for (let i = 0; i < 3; i++) {
+    if (!tail.includes(idx[i])) continue;
+    for (let j = 3; j < 6; j++) if (!tail.includes(idx[j])) { [idx[i], idx[j]] = [idx[j], idx[i]]; break; }
+  }
+  return 'wallpapers/' + WALLS[idx[pos]];
+}
+function setZen(on) {
+  document.body.classList.toggle('zen', on);
+  const el = document.getElementById('zenbg');
+  if (!on) { el.classList.remove('on'); return; }
+  const url = dailyWall();
+  if (el.dataset.src === url) { el.classList.add('on'); return; }
+  const img = new Image();                       // fade in only once it's loaded
+  img.onload = () => { el.dataset.src = url; el.style.backgroundImage = `url(${url})`; el.classList.add('on'); };
+  img.src = url;
+}
+
+/* ── empty state ── */
+function checkEmpty() {
+  // Unread at inbox zero → zen mode (daily wallpaper, no words). Inspiration
+  // empty shows nothing in the middle either. Nothing to display otherwise.
+  setZen(currentBoard === 'backlog' && boardItems(currentBoard).length === 0);
+}
+
+let toastTimer;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
+
+/* ── keep the live page fresh ──
+   A cheap "what's the newest save?" probe runs every 2s (one tiny row), so a
+   link saved via the fn-key shows up well before its save animation finishes.
+   We only reload + re-render when that newest timestamp actually changes, so
+   the board doesn't churn. Every 10th tick (20s) we do a full reload anyway to
+   pick up quieter edits (enrichment, moves from another device), and switching
+   back to this tab refreshes immediately. ── */
+let newestSeen = '';
+const localNewest = () => links.reduce((m, l) => l.created_at > m ? l.created_at : m, '');
+async function remoteNewest() {
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/links?select=created_at&order=created_at.desc&limit=1', { headers: H });
+    const rows = await r.json();
+    return rows[0]?.created_at || '';
+  } catch { return null; }
+}
+function busy() { return cardDrag || bubbleDrag || editingCat || reorderingCat || animating; }
+async function refresh() {
+  const ok = await load();
+  if (ok && !busy()) { render(); newestSeen = localNewest(); }
+}
+async function boot() { await load(); render(); fit(); newestSeen = localNewest(); }   // no animation on load
+boot();
+
+let pollTick = 0;
+setInterval(async () => {
+  if (busy()) return;
+  pollTick++;
+  if (pollTick % 10 === 0) { await refresh(); return; }   // periodic full reload (every 20s)
+  const newest = await remoteNewest();                    // cheap insert probe (every 2s)
+  if (newest && newest !== newestSeen && !busy()) await refresh();
+}, 2000);
+
+window.addEventListener('visibilitychange', () => { if (!document.hidden && !busy()) refresh(); });
+</script>
+</body>
+</html>

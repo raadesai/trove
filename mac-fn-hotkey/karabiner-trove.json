@@ -1,0 +1,38 @@
+{
+  "title": "Trove",
+  "rules": [
+    {
+      "description": "Double-tap fn → save current Chrome tab to Trove",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "fn" },
+          "conditions": [
+            { "type": "variable_if", "name": "trove_fn_tap", "value": 1 }
+          ],
+          "to": [
+            { "shell_command": "$HOME/trove/mac-fn-hotkey/save.sh" },
+            { "set_variable": { "name": "trove_fn_tap", "value": 0 } }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "fn" },
+          "to": [
+            { "key_code": "fn" },
+            { "set_variable": { "name": "trove_fn_tap", "value": 1 } }
+          ],
+          "to_delayed_action": {
+            "to_if_invoked": [
+              { "set_variable": { "name": "trove_fn_tap", "value": 0 } }
+            ],
+            "to_if_canceled": [
+              { "set_variable": { "name": "trove_fn_tap", "value": 0 } }
+            ]
+          },
+          "parameters": { "basic.to_delayed_action_delay_milliseconds": 350 }
+        }
+      ]
+    }
+  ]
+}

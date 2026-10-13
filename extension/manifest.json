@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Trove — save link",
+  "version": "1.0",
+  "description": "One click: save the current tab to your Trove map.",
+  "permissions": ["tabs", "notifications"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Save to Trove (⌘⇧S)" },
+  "commands": {
+    "save-link": {
+      "suggested_key": { "default": "Ctrl+Shift+S", "mac": "Command+Shift+S" },
+      "description": "Save current tab to Trove"
+    }
+  }
+}

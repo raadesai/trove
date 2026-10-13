@@ -1,0 +1,9 @@
+# Only the web app (index.html + config.js + wallpapers) is served publicly.
+# Everything below is non-web or carries secrets and must NOT be on the site.
+.git
+.claude
+.DS_Store
+extension
+mac-fn-hotkey
+supabase
+README.md
