@@ -96,3 +96,7 @@ If double-tap feels flaky, the extension's ⌘⇧S is the reliable path — keep
   and brings it back to Unread.
 - LinkedIn previews are unreliable by design (they block preview services); those
   cards fall back to title-only and still look fine.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
